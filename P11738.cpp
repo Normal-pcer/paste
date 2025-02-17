@@ -1391,6 +1391,7 @@ namespace FutureProgram {
                 }
                 return std::pair{postfix, it};
             }();
+            if (postfix.empty())  return {nullptr, it};  // 特判空语句
             // 建立表达式树
             // 对于所有非运算符，节点压入栈中
             // 对于所有运算符，弹出对应数量的节点作为儿子，建立运算符节点，然后压入栈中
@@ -1461,15 +1462,6 @@ namespace FutureProgram {
             Object(Type type = None): type(type), value(nullptr) {}
             template <typename T>
             Object(Type type, const T &value): type(type), value(value) {}
-
-            Object copy() {
-                if (type == Int) {
-                    return Object{Int, std::get<int>(value)};
-                } else {
-                    unreachable();
-                    return Object{};
-                }
-            }
         };
         struct ArrayMeta;
         struct TypeName {
@@ -1699,7 +1691,7 @@ namespace FutureProgram {
                 assert(l_son_ptr != nullptr);
                 auto &l_son = *l_son_ptr;
                 auto r_son = evaluateExpression(node->right);
-                l_son = r_son.copy();
+                l_son = r_son;
                 return l_son;
             } else if (node->op == AST::ExpressionNode::BitShiftLeft) {
                 auto l_son = evaluateExpression(node->left);
@@ -1781,7 +1773,7 @@ namespace FutureProgram {
                         enterScope();
                         for (auto i = 0; i < size; i++) {
                             topScope()->declare(func->args[i].name, evaluateType(func->args[i].typeName));
-                            topScope()->get(func->args[i].name) = args[i].copy();
+                            topScope()->get(func->args[i].name) = args[i];
                         }
                         runBlock(func->body);
                         leaveScope();
@@ -1836,7 +1828,7 @@ namespace FutureProgram {
                     topScope()->declare(name, real_type);
                     if (var->initializer != nullptr) {
                         assert(type.type == TypeName::Int);
-                        topScope()->get(name) = evaluateExpression(var->initializer).copy();
+                        topScope()->get(name) = evaluateExpression(var->initializer);
                     }
                 }
             }
@@ -1884,15 +1876,22 @@ namespace FutureProgram {
                 }
             } else if (x->type == AST::StatementNode::ForStatement) {
                 auto for_statement = dynamic_cast<AST::ForStatementNode *>(x);
-                runStatement(for_statement->init);
+                if (for_statement->init != nullptr) {
+                    runStatement(for_statement->init);
+                }
                 if (returnFlag)  return;
                 while (true) {
-                    auto condition = evaluateExpression(for_statement->condition);
-                    assert(condition.type == Object::Int);
-                    if (std::get<int>(condition.value) == 0)  break;
+                    if (for_statement->condition != nullptr) {
+                        auto condition =  evaluateExpression(for_statement->condition);
+                        assert(condition.type == Object::Int);
+                        if (std::get<int>(condition.value) == 0)  break;
+                    }
                     runBlock(for_statement->body);
                     if (returnFlag)  return;
-                    evaluateExpression(for_statement->step);
+
+                    if (for_statement->step != nullptr) {
+                        evaluateExpression(for_statement->step);
+                    }
                 }
             } else if (x->type == AST::StatementNode::ReturnStatement) {
                 // 修改 ret 寄存器
