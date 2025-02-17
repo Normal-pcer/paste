@@ -357,7 +357,7 @@ namespace FutureProgram {
         // 符号表
         inline static Trie::Trie symbols {
             "<=", ">=", "!=", "==", "<<", ">>", "<=>", "&&", "||", "+=", "-=", "*=", "/=", "%=", "|=", "&=", "^=", "->",
-            "++", "--", ".."
+            "++", "--", "..", "::"
         };
 
         // Token 定义
@@ -652,8 +652,9 @@ namespace FutureProgram {
                 // 其他
                 Range,  // 范围（..）运算符
                 MemberAccess,  // 成员访问运算符（.）
+                ScopeResolution  // 作用域解析
             } op = NoneOp;
-            static constexpr const char *opNames[] = {"NoneOp", "Bracket", "Call", "FunctionArgsBracket", "Subscript", "SubscriptBracket", "SplitComma", "UnaryAdd", "UnarySub", "Add", "Sub", "Mul", "Div", "Mod", "Less", "LessEqual", "Greater", "GreaterEqual", "Equal", "NotEqual", "And", "Or", "Not", "BitAnd", "BitOr", "BitXor", "BitNot", "BitShiftLeft", "BitShiftRight", "Assign", "Range", "MemberAccess"};
+            static constexpr const char *opNames[] = {"NoneOp", "Bracket", "Call", "FunctionArgsBracket", "Subscript", "SubscriptBracket", "SplitComma", "UnaryAdd", "UnarySub", "Add", "Sub", "Mul", "Div", "Mod", "Less", "LessEqual", "Greater", "GreaterEqual", "Equal", "NotEqual", "And", "Or", "Not", "BitAnd", "BitOr", "BitXor", "BitNot", "BitShiftLeft", "BitShiftRight", "Assign", "Range", "MemberAccess", "ScopeResolution"};
             // 操作数；特别地，单目运算符只有 left
             ExpressionNode *left = nullptr, *right = nullptr;
             ExpressionNode(Operator op = NoneOp): op(op) {}
@@ -694,6 +695,7 @@ namespace FutureProgram {
                 case Assign:  return {16, true};
                 case MemberAccess:  return {2, false};
                 case Range:  return {14, false};
+                case ScopeResolution:  return {1, false};
                 default:  return {OperatorInfo::priority_max, false};
                 }
             }
@@ -1359,6 +1361,7 @@ namespace FutureProgram {
                         JOIN_BINARY_OP(Assign, "=")
                         JOIN_BINARY_OP(MemberAccess, ".")
                         JOIN_BINARY_OP(Range, "..")
+                        JOIN_BINARY_OP(ScopeResolution, "::")
 #undef JOIN_BINARY_OP
                         else if (op == "!") {
                             ops.back().args_remains--;
@@ -1448,16 +1451,25 @@ namespace FutureProgram {
                 Struct, Int, Function, String, None, Array, BuiltinFunction, BuiltinIStream, BuiltinOStream, BuiltinEndl
             } type;
             std::variant<
-                std::nullptr_t,  // 没有东西
-                int,  // int
-                std::shared_ptr<std::string>,  // string
-                std::shared_ptr<Identifier>,  // builtin_function
-                std::shared_ptr<ArrayObjectValue>,  // array
-                AST::FunctionDeclareStatementNode *  // function
+                std::nullptr_t, 
+                int, 
+                std::shared_ptr<std::string>, 
+                std::shared_ptr<Identifier>,
+                std::shared_ptr<ArrayObjectValue>,
+                AST::FunctionDeclareStatementNode *
             > value;
             Object(Type type = None): type(type), value(nullptr) {}
             template <typename T>
             Object(Type type, const T &value): type(type), value(value) {}
+
+            Object copy() {
+                if (type == Int) {
+                    return Object{Int, std::get<int>(value)};
+                } else {
+                    unreachable();
+                    return Object{};
+                }
+            }
         };
         struct ArrayMeta;
         struct TypeName {
@@ -1678,6 +1690,8 @@ namespace FutureProgram {
                 }
             } else if (node->op == node->MemberAccess) {
                 return *evaluateLeftValueExpression(node);
+            } else if (node->op == AST::ExpressionNode::ScopeResolution) {
+                return evaluateExpression(node->right);
             } else if (node->op == AST::ExpressionNode::Subscript) {
                 return *evaluateLeftValueExpression(node);
             } else if (node->op == AST::ExpressionNode::Assign) {
@@ -1685,7 +1699,7 @@ namespace FutureProgram {
                 assert(l_son_ptr != nullptr);
                 auto &l_son = *l_son_ptr;
                 auto r_son = evaluateExpression(node->right);
-                l_son = r_son;
+                l_son = r_son.copy();
                 return l_son;
             } else if (node->op == AST::ExpressionNode::BitShiftLeft) {
                 auto l_son = evaluateExpression(node->left);
@@ -1767,7 +1781,7 @@ namespace FutureProgram {
                         enterScope();
                         for (auto i = 0; i < size; i++) {
                             topScope()->declare(func->args[i].name, evaluateType(func->args[i].typeName));
-                            topScope()->get(func->args[i].name) = args[i];
+                            topScope()->get(func->args[i].name) = args[i].copy();
                         }
                         runBlock(func->body);
                         leaveScope();
@@ -1822,7 +1836,7 @@ namespace FutureProgram {
                     topScope()->declare(name, real_type);
                     if (var->initializer != nullptr) {
                         assert(type.type == TypeName::Int);
-                        topScope()->get(name) = evaluateExpression(var->initializer);
+                        topScope()->get(name) = evaluateExpression(var->initializer).copy();
                     }
                 }
             }
